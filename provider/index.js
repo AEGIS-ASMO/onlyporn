@@ -1,7 +1,7 @@
 const defaultProvider = require('./provider').create();
 const { catalogNames } = require('../catalog');
 
-const providers = catalogNames.map(name => require(`./${name}`)());
+const providers = catalogNames.map(name => new (require(`./${name}`))());
 
 function loadProvider(id) {
   // TODO use a hash map later to get provider
