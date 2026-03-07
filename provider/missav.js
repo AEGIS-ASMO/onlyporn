@@ -1,34 +1,44 @@
 const Provider = require('../provider')
 const cheerio = require('cheerio')
 
+const pathMappings = {
+  "Uncensored leak": "/uncensored-leak",
+  "Most viewed today": "/today-hot",
+  "Weekly hot": "/weekly-hot",
+  "Monthly hot": "/monthly-hot"
+}
+
 class MissAV extends Provider {
 
   constructor() {
-    super('https://missav.ws', 'missav', 10)
-    this.dataset = {}
-    this.metas = {}
+    super('https://missav.ws', 'missav', 20)
   }
 
-  async search(query) {
+  async catalog({ extra }) {
 
-    const url = `${this.baseUrl}/search/${encodeURIComponent(query)}`
+    const genre = extra?.genre
+    const skip = Number(extra?.skip) || 0
+
+    const path = pathMappings[genre] || "/today-hot"
+    const page = Math.floor(skip / 20) + 1
+
+    const url = `${this.baseUrl}${path}?page=${page}`
     const html = await this.request(url)
 
     const $ = cheerio.load(html)
 
-    const results = []
+    const metas = []
 
     $('div.thumbnail').each((i, el) => {
 
       const node = $(el)
-
       const link = node.find('a').attr('href')
+
       if (!link) return
 
       const id = link.split('/').pop()
 
       const title = node.find('a').attr('title') || id
-
       const img = node.find('img')
 
       const poster =
@@ -36,7 +46,7 @@ class MissAV extends Provider {
         img.attr('src') ||
         ''
 
-      results.push({
+      metas.push({
         id,
         name: title,
         poster,
@@ -45,34 +55,26 @@ class MissAV extends Provider {
 
     })
 
-    return results
+    return { metas }
+
   }
 
-  async load(id) {
+  async stream({ id }) {
 
     const url = `${this.baseUrl}/${id}`
-
     const html = await this.request(url)
 
     const streams = []
-
-    // Extract m3u8 stream directly
     const match = html.match(/https:\/\/[^"]+playlist\.m3u8/g)
 
     if (match) {
-
       match.forEach(stream => {
-
-        streams.push({
-          title: 'MissAV',
-          url: stream
-        })
-
+        streams.push({ title: "MissAV", url: stream })
       })
-
     }
 
-    return streams
+    return { streams }
+
   }
 
 }
