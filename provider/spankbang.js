@@ -1,76 +1,88 @@
 const Provider = require('../provider')
 const cheerio = require('cheerio')
 
+const baseMappings = {
+  "New": "/new_videos/",
+  "Trending": "/trending_videos/",
+  "Upcoming": "/upcoming_videos/",
+  "Popular": "/popular_videos/"
+}
+
+const tagMappings = {
+  "4k Porn": "/tag/4k/",
+  "HD 1080p": "/tag/1080p/",
+  "Amateur": "/tag/amateur/",
+  "Students": "/tag/students/",
+  "Japanese": "/tag/japanese/",
+  "Asian Porn": "/tag/asian/",
+  "Big Tits": "/tag/big-tits/",
+  "Teens": "/tag/teen/",
+  "Family": "/tag/family/",
+  "Creampie": "/tag/creampie/",
+  "Small Tits": "/tag/small-tits/"
+}
+
 class Spankbang extends Provider {
 
   constructor() {
-    super('https://spankbang.com', 'spankbang', 10)
+    super('https://spankbang.com', 'spankbang', 20)
   }
 
-  async search(query) {
+  async catalog({ extra }) {
 
-    const url = `${this.baseUrl}/s/${encodeURIComponent(query)}/`
+    const genre = extra?.genre
+    const skip = Number(extra?.skip) || 0
+    const page = Math.floor(skip / 20) + 1
+
+    let url
+
+    if (baseMappings[genre]) {
+      url = `${this.baseUrl}${baseMappings[genre]}${page}/`
+    } else {
+
+      for (const tag in tagMappings) {
+        if (genre?.includes(tag)) {
+          url = `${this.baseUrl}${tagMappings[tag]}${page}/`
+          break
+        }
+      }
+
+    }
+
+    if (!url) url = `${this.baseUrl}/new_videos/${page}/`
+
     const html = await this.request(url)
 
     const $ = cheerio.load(html)
-    const results = []
 
-    $('div.video-item, div.thumb').each((i, el) => {
+    const metas = []
+
+    $('div.video-item').each((i, el) => {
 
       const node = $(el)
-
       const link = node.find('a').attr('href')
+
       if (!link) return
 
       const id = link.split('/')[1]
-
-      const title =
-        node.find('a').attr('title') ||
-        node.find('.name').text() ||
-        id
+      const title = node.find('a').attr('title') || id
 
       const img = node.find('img')
-
       const poster =
         img.attr('data-src') ||
-        img.attr('src') ||
-        ''
+        img.attr('src')
 
-      results.push({
+      metas.push({
         id,
-        name: title.trim(),
+        name: title,
         poster,
         type: 'movie'
       })
 
     })
 
-    return results
-  }
+    return { metas }
 
-  async load(id) {
-
-    const url = `${this.baseUrl}/${id}/video`
-    const html = await this.request(url)
-
-    const streams = []
-
-    const match = html.match(/https:\/\/[^"]+\.m3u8/g)
-
-    if (match) {
-
-      match.forEach(stream => {
-
-        streams.push({
-          title: 'SpankBang',
-          url: stream
-        })
-
-      })
-
-    }
-
-    return streams
   }
 
 }
