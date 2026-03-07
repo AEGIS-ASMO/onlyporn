@@ -1,18 +1,17 @@
-const defaultProvider = require('./provider').create();
-const { catalogNames } = require('../catalog');
+const catalogNames = [
+  'spankbang',
+  'missav',
+  'xvideos',
+  'javhd',
+  'javseen',
+  'javcl',
+  'javgg'
+];
 
-const providers = catalogNames.map(name => new (require(`./${name}`))());
+// Load and instantiate providers correctly
+const providers = catalogNames.map((name) => {
+  const ProviderClass = require(`./${name}`);
+  return new ProviderClass();
+});
 
-function loadProvider(id) {
-  // TODO use a hash map later to get provider
-  for (const provider of providers) {
-    if (provider.activate(id)) {
-      return provider;
-    }
-  }
-  return defaultProvider;
-}
-
-module.exports = {
-  loadProvider,
-};
+module.exports = providers;
