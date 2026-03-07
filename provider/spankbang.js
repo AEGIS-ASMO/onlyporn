@@ -1,4 +1,4 @@
-const Provider = require('../provider')
+const Provider = require('./provider');
 const cheerio = require('cheerio')
 
 const baseMappings = {
