@@ -5,6 +5,7 @@ const { event, track } = require('../analytics');
 class Provider {
   static LIMIT = 50;
   static TYPE = 'movie';
+  static TRANSPORT_URL = 'https://07b88951aaab-jaxxx-v2.baby-beamup.club/manifest.json';
 
   constructor(baseUrl, name, limit) {
     this.baseUrl = baseUrl;
@@ -32,7 +33,8 @@ class Provider {
     console.info('fetching url', url);
     try {
       const response = await fetch(url);
-      return response.text();
+      const text = await response.text();
+      return text;
     } catch (error) {
       console.error(error);
       return '';
@@ -42,6 +44,7 @@ class Provider {
   page(skip) {
     if (skip) {
       const page = Math.ceil((skip || 0) / this.limit);
+      if (page === 0) return '';
       return `${page}`;
     }
     return '';
@@ -60,26 +63,28 @@ class Provider {
   }
 
   getCatalogMetas(html) {
-    // TODO: Parse HTML and extract catalog metadata
     return [];
   }
 
-  getAnalyticEvent(event, id) {
+  getAnalyticEvent(eventName, id) {
     if (id) {
-      return `${event}-${id}`;
+      return `${eventName}-${id}`;
     }
-    return `${event}-${this.getName()}`;
+    return `${eventName}-${this.getName()}`;
   }
 
   async handleCatalog(args) {
     if (args.type === Provider.TYPE && this.activate(args.id)) {
       this.track(this.getAnalyticEvent(event.CATALOG, args.id), args);
       logger.info({ args }, 'handleCatalog');
+
       let url = this.getInitialUrl(args.id);
+
       if (args.extra) {
         if (args.extra.search) {
           url = this.handleSearch(args);
         }
+
         if (args.extra.genre) {
           url = this.handleGenre(args);
         }
@@ -89,224 +94,63 @@ class Provider {
         url += this.handlePagination(url, args);
       }
 
-      const html = await this.fetchHtml(url).catch(e => '');
+      const html = await this.fetchHtml(url).catch(() => '');
       const metas = this.getCatalogMetas(html);
+
       logger.debug({ metasSize: metas.length }, 'catalog');
-      return Promise.resolve({ metas });
-    } else {
-      return Promise.resolve({ metas: [] });
+      return { metas };
     }
+
+    return { metas: [] };
   }
 
   async handleMeta(args) {
     if (args.type === Provider.TYPE && this.activate(args.id)) {
       this.track(this.getAnalyticEvent(event.METADATA), args);
-      return this.getMetadata(args)
-        .then(meta => {
-          return { meta };
-        });
+
+      const meta = await this.getMetadata(args);
+      return { meta };
     }
 
-    return Promise.resolve({ meta: {} });
+    return { meta: {} };
   }
 
   async getMetadata(args) {
     logger.info({ args }, 'getMetadata');
+
     const { id } = args;
-    return this.fetchHtml(id)
-      .then(html => this.parseVideoPage({ id, html }));
+
+    const html = await this.fetchHtml(id);
+    return this.parseVideoPage({ id, html });
   }
 
   async handleStream(args) {
     const { id } = args;
+
     if (args.type === Provider.TYPE && this.activate(id)) {
       this.track(this.getAnalyticEvent(event.STREAM), args);
       logger.info({ args }, 'handleStream');
+
       return this.processStreams(args);
     }
-    return Promise.resolve({ streams: [] });
+
+    return { streams: [] };
   }
 
   async processStreams({ id }) {
-    return this.fetchHtml(id)
-      .then(html => this.parseVideoPage({ id, html }))
-      .then(meta => this.getStreams(meta));
+    const html = await this.fetchHtml(id);
+    const meta = await this.parseVideoPage({ id, html });
+
+    return this.getStreams(meta);
   }
 
-  getStreams(meta) {
-    return this.fetchHtml(meta.videoPageUrl)
-      .then(content => this.parseM3u8(content))
-      .then(streams => streams.map(stream => this.transformStream(meta.videoPageUrl, stream)))
-      .then(streams => {
-        return { streams };
-      });
-  }
+  async getStreams(meta) {
+    const content = await this.fetchHtml(meta.videoPageUrl);
 
-  transformStream(url, stream) {
-    // TODO: Transform stream data as needed
-    return stream;
-  }
+    const streams = this.parseM3u8(content)
+      .map(stream => this.transformStream(meta.videoPageUrl, stream));
 
-  parseM3u8(content) {
-    const streams = [];
-    const parser = new m3u8.Parser();
-    parser.push(content);
-    parser.end();
-    try {
-      parser.manifest.playlists.forEach(playlist => {
-        streams.push({
-          resolution: playlist.attributes.RESOLUTION.height + 'p',
-          uri: playlist.uri,
-        });
-      });
-      streams.sort((a, b) => parseInt(b.resolution.split('p')[0]) - parseInt(a.resolution.split('p')[0]));
-      logger.debug({ streams }, 'streams', streams.length);
-      return streams.map((stream) => {
-        return {
-          type: 'movie',
-          url: stream.uri,
-          name: stream.resolution,
-        };
-      });
-    } catch (e) {
-      console.error('parseM3u8 error', e);
-      return streams;
-    }
-  }
-
-  parseVideoPage(args) {
-    // TODO: Parse video page HTML and extract metadata
-    return {};
-  }
-
-  track(a1, a2) {
-    track(a1, a2);
-  }
-}
-
-module.exports = Provider;
-  getInitialUrl(catalogId) {
-    return this.baseUrl;
-  }
-
-  static create() {
-    return new Provider('', 'default');
-  }
-
-  async fetchHtml(url) {
-    console.info('fetching url', url);
-    try {
-      const response = await fetch(url);
-      return response.text();
-    } catch (error) {
-      console.error(error);
-      return '';
-    }
-  }
-
-  page(skip) {
-    if (skip) {
-      const page = Math.ceil((skip || 0) / this.limit);
-      if (page === 0) {
-        return '';
-      }
-      return `${page}`;
-    }
-    return '';
-  }
-
-  handleSearch({ extra: { search: keyword } }) {
-    return `/search/${keyword}/`;
-  }
-
-  handleGenre({ extra: { genre } }) {
-    return '?genre=' + genre;
-  }
-
-  handlePagination(url, { extra: { skip } }) {
-    return `?skip=${skip}`;
-  }
-
-  getCatalogMetas(html) {
-    return [];
-  }
-
-  getAnalyticEvent(event, id) {
-    if (id) {
-      return `${event}-${id}`;
-    }
-    return `${event}-${this.getName()}`;
-  }
-
-  async handleCatalog(args) {
-    if (args.type === Provider.TYPE && this.activate(args.id)) {
-      this.track(this.getAnalyticEvent(event.CATALOG, args.id), args);
-      logger.info({ args }, 'handleCatalog');
-      let url = this.getInitialUrl(args.id);
-      if (args.extra) {
-        if (args.extra.search) {
-          url = this.handleSearch(args);
-        }
-        if (args.extra.genre) {
-          url = this.handleGenre(args);
-        }
-      }
-
-      if (args.extra.skip) {
-        url += this.handlePagination(url, args);
-      }
-
-      const html = await this.fetchHtml(url).catch(e => '');
-      const metas = this.getCatalogMetas(html);
-      logger.debug({ metasSize: metas.length }, 'catalog');
-      return Promise.resolve({ metas });
-    } else {
-      return Promise.resolve({ metas: [] });
-    }
-  }
-
-  async handleMeta(args) {
-    if (args.type === Provider.TYPE && this.activate(args.id)) {
-      this.track(this.getAnalyticEvent(event.METADATA), args);
-      return this.getMetadata(args)
-        .then(meta => {
-          return { meta };
-        });
-    }
-
-    return Promise.resolve({ meta: {} });
-  }
-
-  async getMetadata(args) {
-    logger.info({ args }, 'getMetadata');
-    const { id } = args;
-    return this.fetchHtml(id)
-      .then(html => this.parseVideoPage({ id, html }));
-  }
-
-  async handleStream(args) {
-    const { id } = args;
-    if (args.type === Provider.TYPE && this.activate(id)) {
-      this.track(this.getAnalyticEvent(event.STREAM), args);
-      logger.info({ args }, 'handleStream');
-      return this.processStreams(args);
-    }
-    return Promise.resolve({ streams: [] });
-  }
-
-  async processStreams({ id }) {
-    return this.fetchHtml(id)
-      .then(html => this.parseVideoPage({ id, html }))
-      .then(meta => this.getStreams(meta));
-  }
-
-  getStreams(meta) {
-    return this.fetchHtml(meta.videoPageUrl)
-      .then(content => this.parseM3u8(content))
-      .then(streams => streams.map(stream => this.transformStream(meta.videoPageUrl, stream)))
-      .then(streams => {
-        return { streams };
-      });
+    return { streams };
   }
 
   transformStream(url, stream) {
@@ -315,28 +159,39 @@ module.exports = Provider;
 
   parseM3u8(content) {
     const streams = [];
-    const parser = new m3u8.Parser();
-    parser.push(content);
-    parser.end();
+
     try {
+      const parser = new m3u8.Parser();
+      parser.push(content);
+      parser.end();
+
+      if (!parser.manifest.playlists) {
+        return [];
+      }
+
       parser.manifest.playlists.forEach(playlist => {
         streams.push({
           resolution: playlist.attributes.RESOLUTION.height + 'p',
           uri: playlist.uri,
         });
       });
-      streams.sort((a, b) => parseInt(b.resolution.split('p')[0]) - parseInt(a.resolution.split('p')[0]));
-      logger.debug({ streams }, 'streams', streams.length);
-      return streams.map((stream) => {
-        return {
-          type: 'movie',
-          url: stream.uri,
-          name: stream.resolution,
-        };
-      });
+
+      streams.sort(
+        (a, b) =>
+          parseInt(b.resolution) - parseInt(a.resolution)
+      );
+
+      logger.debug({ streams }, 'streams');
+
+      return streams.map(stream => ({
+        type: 'movie',
+        url: stream.uri,
+        name: stream.resolution,
+      }));
+
     } catch (e) {
       console.error('parseM3u8 error', e);
-      return streams;
+      return [];
     }
   }
 
@@ -345,7 +200,11 @@ module.exports = Provider;
   }
 
   track(a1, a2) {
-    // track(a1, a2)
+    try {
+      track(a1, a2);
+    } catch (e) {
+      console.warn('analytics disabled');
+    }
   }
 }
 
