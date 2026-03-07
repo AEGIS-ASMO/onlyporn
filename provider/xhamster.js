@@ -1,115 +1,117 @@
-const { load } = require('cheerio');
-const logger = require('../logger');
-const { meta } = require('../model');
-const Provider = require('./provider');
+const Provider = require('../provider')
+const cheerio = require('cheerio')
 
-const pathMappings = {
-  'Best (Daily)': '/best/daily',
-  'Best (Weekly)': '/best/weekly',
-  'Best (Monthly)': '/best/monthly',
-};
-
-class XhamsterProvider extends Provider {
+class XHamster extends Provider {
 
   constructor() {
-    super('https://xhamster.com', 'xhamster', 45);
+    super('https://xhamster.com', 'xhamster', 10)
   }
-
-  static create() {
-    return new XhamsterProvider();
-  }
-
 
   getInitialUrl(catalogId) {
-    let url = this.baseUrl;
+
     if (catalogId.includes('4k')) {
-      url += '/4k';
+      return `${this.baseUrl}/videos?quality=4k`
     }
-    return url + '/newest';
-  }
 
-  handleSearch({ extra: { search: keyword } }) {
-    return `${this.baseUrl}/search/${keyword}/`;
-  }
-
-  handleGenre({ id, extra: { genre } }) {
-    let path = '';
-    if (id.includes('4k')) {
-      path += '/4k';
+    if (catalogId.includes('HD+')) {
+      return `${this.baseUrl}/videos?quality=hd`
     }
-    path += pathMappings[genre];
-    return this.baseUrl + path;
+
+    return `${this.baseUrl}/newest`
   }
 
-  handlePagination(url, { extra: { skip } }) {
-    const prefix = url.endsWith('/') ? '' : '/';
-    return `${prefix}${this.page(skip)}/`;
+  async search(query) {
+
+    const url = `${this.baseUrl}/search/${encodeURIComponent(query)}`
+    const html = await this.request(url)
+
+    const $ = cheerio.load(html)
+
+    const results = []
+
+    $('div.thumb-list__item, div.video-thumb').each((i, el) => {
+
+      const node = $(el)
+
+      const link = node.find('a').attr('href')
+      if (!link) return
+
+      const id = link.split('/').pop()
+
+      const title =
+        node.find('a').attr('title') ||
+        node.find('.video-thumb-info__name').text() ||
+        id
+
+      const img = node.find('img')
+
+      const poster =
+        img.attr('src') ||
+        img.attr('data-src') ||
+        img.attr('data-preview') ||
+        ''
+
+      results.push({
+        id,
+        name: title.trim(),
+        poster,
+        type: 'movie'
+      })
+
+    })
+
+    return results
   }
 
-  getCatalogMetas(html) {
-    const metadataList = [];
+  async load(id) {
 
-    // Load the HTML content using cheerio
-    const $ = load(html);
+    const url = `${this.baseUrl}/videos/${id}`
+    const html = await this.request(url)
 
-    $('div.thumb-list__item')
-      .each((_, element) => {
-        const $e = $(element);
-        const $a = $e.children('a');
-        const $img = $a.children('img').first();
-        const poster = $img.attr('src');
-        const title = $img.attr('alt');
-        const videoPageUrl = $a.first().attr('href');
+    const streams = []
 
-        if (videoPageUrl) {
-          metadataList.push(new meta.MetaPreview(videoPageUrl, 'movie', title, poster, {
-            videoPageUrl,
-          }));
+    // updated JSON extraction
+    const regex = /window\.initials\s*=\s*(\{.*?\})\s*;/s
+    const match = html.match(regex)
+
+    if (!match) {
+      throw new Error('XHamster metadata not found')
+    }
+
+    const json = JSON.parse(match[1])
+
+    const sources =
+      json?.videoModel?.sources?.hls ||
+      json?.videoModel?.sources?.standard ||
+      []
+
+    if (Array.isArray(sources)) {
+
+      sources.forEach(src => {
+
+        if (src.url) {
+
+          streams.push({
+            title: `XHamster ${src.quality || ''}`.trim(),
+            url: src.url
+          })
+
         }
-      });
 
-    return metadataList;
-  }
+      })
 
-  async getMetadata(args) {
-    logger.debug({ args }, 'getMetadata');
-    const { id } = args;
-    return this.fetchHtml(id)
-      .then(html => this.parseVideoPage({ id, html }));
-  }
+    } else if (sources.url) {
 
-  parseVideoPage({ id, html }) {
-    const regex = /window.initials=\{(.*)\};/;
-    let match = html.match(regex);
-    if (match && match[1]) {
-      match = '{' + match[1] + '}';
+      streams.push({
+        title: 'XHamster',
+        url: sources.url
+      })
+
     }
 
-    const json = JSON.parse(match);
-    const { av1, h264 } = json.xplayerSettings.sources.hls;
-    const response = new meta.MetaResponse(
-      id,
-      Provider.TYPE,
-      json.videoEntity.title,
-      {
-        videoPageUrl: (av1 && av1.url) || (h264 && h264.url),
-        description: json.videoModel.description || json.videoModel.title,
-        poster: json.videoModel.thumbURL,
-        background: json.videoModel.thumbURL,
-        genres: (json.videoTagsListProps && json.videoTagsListProps.tags && json.videoTagsListProps.tags.map(tag => tag.name).slice(0, 20)) || [],
-      },
-    );
-
-    return response;
+    return streams
   }
 
-  transformStream(url, stream) {
-    return {
-      ...stream,
-      url: url.replace('_TPL_.av1.mp4.m3u8', '')
-        .replace('_TPL_.h264.mp4.m3u8', '') + stream.url,
-    };
-  }
 }
 
-module.exports = XhamsterProvider.create;
+module.exports = XHamster
