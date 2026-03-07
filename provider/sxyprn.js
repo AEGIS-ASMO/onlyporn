@@ -1,159 +1,78 @@
-require('dotenv').config();
-const { load } = require('cheerio');
-const logger = require('../logger');
-const { meta } = require('../model');
-const Provider = require('./provider');
+const Provider = require('../provider')
+const cheerio = require('cheerio')
 
-const sortByMappings = {
-  'Latest': 'latest',
-  'Trending': 'trending',
-  'Views': 'views',
-  'Orgasmic': 'orgasmic',
-};
+class SxyPrn extends Provider {
 
-class SxyprnProvider extends Provider {
   constructor() {
-    super('https://www.sxyprn.com', 'sxyprn', 25);
+    super('https://sxyprn.com', 'sxyprn', 10)
   }
 
-  static create() {
-    return new SxyprnProvider();
-  }
+  async search(query) {
 
-  getInitialUrl(catalogId) {
-    return this.baseUrl
-  }
+    const url = `${this.baseUrl}/search/${encodeURIComponent(query)}`
+    const html = await this.request(url)
 
-  handleSearch({ extra: { search: keyword } }) {
-    return `${this.baseUrl}/${encodeURIComponent(keyword)}.html`;
-  }
+    const $ = cheerio.load(html)
 
-  handleGenre({ id, extra: { genre } }) {
-    if (genre.includes('/cat')) {
-      return `${this.baseUrl}${genre}`;
-    }
-    let [category, sortBy] = genre.split('(');
-    category = category.trim().replace(' ', '-').trim();
-    sortBy = sortByMappings[sortBy.replace(')', '')];
-    return `${this.baseUrl}/${category}.html?sm=${sortBy.toLowerCase()}`;
-  }
+    const results = []
 
-  handlePagination(url, { extra: { genre, skip } }) {
-    const limit = 30;
-    if (genre) {
-      return `&page=${limit * this.page(skip)}`
-    }
-    if (url === this.baseUrl) {
-      return `/orgasm/${limit * this.page(skip)}`;
-    }
-    const prefix = url.endsWith('/') ? '' : '/';
-    return `${prefix}${this.page(skip)}`;
-  }
+    $('div.thumb').each((i, el) => {
 
-  getCatalogMetas(html) {
-    const metadataList = [];
-    const $ = load(html);
+      const node = $(el)
 
-    $('div.post_el_small').each((_, element) => {
-      const $e = $(element);
-      const title = $e.children('.post_text').text();
-      const poster = 'https:' + $e.find('img').first().attr('data-src');
-      const path = $e.find('.js-pop').first().attr('href');
-      const videoPageUrl = this.baseUrl + path;
+      const link = node.find('a').attr('href')
+      if (!link) return
 
-      if (path) {
-        metadataList.push(
-          new meta.MetaPreview(
-            videoPageUrl,
-            'movie',
-            title,
-            poster,
-            {
-              videoPageUrl,
-            }
-          )
-        );
-      }
-    });
+      const id = link.split('/').pop()
 
-    return metadataList;
-  }
+      const title =
+        node.find('a').attr('title') ||
+        id
 
-  async getMetadata(args) {
-    logger.debug({ args }, 'getMetadata');
-    const { id } = args;
-    return this.fetchHtml(id).then((html) => this.parseVideoPage({ id, html }));
-  }
+      const img = node.find('img')
 
-  getvsrc(html) {
-    const $ = load(html);
-    if ($('.vidsnfo').length) {
-      var vidsnfo = $('.vidsnfo').data('vnfo');
-      for (const [pid, src] of Object.entries(vidsnfo)) {
-        var tmp = src.split("/");
-        tmp[1] += "8";
-        tmp = this.preda(tmp);
-        return tmp.join("/");
-      }
-    }
-    return null;
-  }
+      const poster =
+        img.attr('data-src') ||
+        img.attr('src') ||
+        ''
 
-  preda(arg) {
-    arg[5] -= parseInt(this.ssut51(arg[6])) + parseInt(this.ssut51(arg[7]));
-    return arg;
-  }
-
-  ssut51(arg) {
-    var str = arg.replace(/[^0-9]/g, '');
-    var sut = 0;
-    for (var i = 0; i < str.length; i++) {
-      sut += parseInt(str.charAt(i), 10);
-    }
-    return sut;
-  }
-
-  parseVideoPage({ id, html }) {
-    const $ = load(html);
-    let videoPageUrl = null;
-    const $metas = $('meta');
-    let metaMap = {};
-    $metas.each((i, e) => {
-      const attribs = e.attribs;
-      metaMap[attribs.name || attribs.property] = attribs.content;
-    });
-    const poster = 'https:' + metaMap['og:image'];
-    const description = metaMap['og:description'];
-    const vidSrc = this.getvsrc(html);
-
-    if (vidSrc) {
-      videoPageUrl = this.baseUrl + vidSrc;
-    }
-
-    return new meta.MetaResponse(
-      id,
-      Provider.TYPE,
-      metaMap['og:title'],
-      {
-        description,
+      results.push({
+        id,
+        name: title.trim(),
         poster,
-        background: poster,
-        videoPageUrl
-      }
-    );
+        type: 'movie'
+      })
+
+    })
+
+    return results
   }
 
-  async getStreams(meta) {
-    return {
-      streams: [
-        {
-          type: Provider.TYPE,
-          url: meta.videoPageUrl,
-          name: 'OnlyPorn HD'
-        }
-      ]
-    };
+  async load(id) {
+
+    const url = `${this.baseUrl}/${id}.html`
+    const html = await this.request(url)
+
+    const streams = []
+
+    const match = html.match(/https:\/\/[^"]+\.mp4/g)
+
+    if (match) {
+
+      match.forEach(stream => {
+
+        streams.push({
+          title: 'SxyPrn',
+          url: stream
+        })
+
+      })
+
+    }
+
+    return streams
   }
+
 }
 
-module.exports = SxyprnProvider.create;
+module.exports = SxyPrn
