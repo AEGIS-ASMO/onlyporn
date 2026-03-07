@@ -1,3 +1,7 @@
+headers: {
+  "User-Agent":
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+}
 const axios = require('axios');
 const m3u8 = require('m3u8-parser');
 const logger = require('../logger');
